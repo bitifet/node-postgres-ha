@@ -2,13 +2,16 @@
 const pg = require("pg");
 
 
+const isDefunct = cl=>!!cl._ended;
+
 class Pool extends pg.Pool {
 
     // Overload Client implementation
-    constructor(...args) {//{{{
-        super(...args);
+    constructor({autoRecover = false, ...options}, ...args) {//{{{
+        super(options, ...args);
         const baseClient = this.Client;
         const parentPool = this;
+        this.autoRecover = !! autoRecover;
 
         this.Client = class extendedClient extends baseClient {
             constructor(...args) {
@@ -25,6 +28,17 @@ class Pool extends pg.Pool {
             };
         };
         this.on("error", (...args) => this.emit("allErrors", ...args));
+
+        if (this.autoRecover) {
+            let recovering = false;
+            this.on("allErrors", async ()=>{
+                if (! recovering) {
+                    recovering = true;
+                    await this.recover();
+                    recovering = false;
+                };
+            });
+        };
 
     };//}}}
 
@@ -51,18 +65,25 @@ class Pool extends pg.Pool {
     };//}}}
 
     // Add method to retrieve overall pool status:
-    status() {//{{{
+    status(showClients = false) {//{{{
         const max = this.options.max;
         const used = this._clients.length;
         const free = max - used;
         const pending = this._pendingQueue.length;
+        const defunct = this._clients.filter(isDefunct).length;
+        const alive = this._clients.length - defunct;
         return {
             max,
             used,
             free,
+            alive,
+            defunct,
             pending,
-            clients: this._clients.map(
-                this.constructor.clientStatus
+            ...(
+                showClients ? {
+                    clients: this._clients.map(this.constructor.clientStatus)
+                }
+                : {}
             ),
         };
     };//}}}
@@ -70,10 +91,19 @@ class Pool extends pg.Pool {
     // Overload connect() method to:
     //   - Capture failed connection attempt errors.
     //   - Return a proxy preventing client access after releasing.
-    async connect(...args) {
+    async connect(...args) {//{{{
         try {
-            const client = await super.connect(...args);
+            let client = await super.connect(...args);
             let released = false;
+            if (
+                ! client // No available clients
+                && this.autoRecover
+                && await this.recover()
+            ) {
+                // Try again...
+                client = await super.connect(...args);
+            };
+            if (! client) return;
             return new Proxy(client, {
                 get(target, prop, receiver) {
                     const value = Reflect.get(target, prop, receiver);
@@ -101,9 +131,9 @@ class Pool extends pg.Pool {
             this.emit("error", err, null);
             throw err;
         };
-    };
+    };//}}}
 
-    async end(...args) {
+    async end(...args) {//{{{
         while (this._pendingQueue.length) {
             const pendingItem = this._pendingQueue.pop();
             pendingItem.callback(new Error("Pool is going down"));
@@ -118,6 +148,18 @@ class Pool extends pg.Pool {
         //
         // }));}}}
         super.end(...args);
+    };//}}}
+
+    async recover() {
+        const targetClients = this._clients.filter(isDefunct);
+        if (! targetClients.length) return false; // Nothing to recover.
+        while (targetClients.length) {
+            await targetClients.pop().release();
+            if ( // Not working
+                this._clients.filter(isDefunct) >= targetClients.length
+            ) break;
+        };
+        return targetClients.length == 0; // Full success.
     };
 
 };
