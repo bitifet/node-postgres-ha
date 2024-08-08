@@ -1,0 +1,3 @@
+node_modules
+**/*.sw*
+test/db_connection.js
