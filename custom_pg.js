@@ -1,18 +1,30 @@
 
 const pg = require("pg");
+const {serverIsReachable, clientIsDefunct} = require("./lib/helpers");
 
-
-const isDefunct = cl=>!!cl._ended;
 
 class Pool extends pg.Pool {
 
     // Overload Client implementation
-    constructor({autoRecover = false, ...options}, ...args) {//{{{
+    constructor({//{{{
+        autoRecover = false,   // Auto-vacuum defunct clients.
+        autoCancel = false,    // Attempt to remote cancel defunct client's queries.
+        reconnectInterval = 5000,
+        ...options
+    }, ...args) {
         super(options, ...args);
+        this.autoRecover = !! autoRecover;
+        this.autoCancel = !! autoCancel;
+        this.reconnectInterval = Number(reconnectInterval);
+        this.defunctPIDs = [];
+        this.isAlive = serverIsReachable.bind(null, this.options.host, this.options.port);
+        this.connectionError = false;
+        this.connectionWatcher = null;
+
+        // Implement allErrors event:{{{
+        // --------------------------
         const baseClient = this.Client;
         const parentPool = this;
-        this.autoRecover = !! autoRecover;
-
         this.Client = class extendedClient extends baseClient {
             constructor(...args) {
                 super(...args);
@@ -28,6 +40,7 @@ class Pool extends pg.Pool {
             };
         };
         this.on("error", (...args) => this.emit("allErrors", ...args));
+        // --------------------------}}}
 
         if (this.autoRecover) {
             let recovering = false;
@@ -40,7 +53,12 @@ class Pool extends pg.Pool {
             });
         };
 
+        this.watchForConnection();
+        this.on("allErrors", this.watchForConnection.bind(this));
+
     };//}}}
+
+
 
     // Add static method to extract client overall status:
     static clientStatus(c) {//{{{
@@ -70,7 +88,7 @@ class Pool extends pg.Pool {
         const used = this._clients.length;
         const free = max - used;
         const pending = this._pendingQueue.length;
-        const defunct = this._clients.filter(isDefunct).length;
+        const defunct = this._clients.filter(clientIsDefunct).length;
         const alive = this._clients.length - defunct;
         return {
             max,
@@ -79,6 +97,7 @@ class Pool extends pg.Pool {
             alive,
             defunct,
             pending,
+            connErr: this.connectionError,
             ...(
                 showClients ? {
                     clients: this._clients.map(this.constructor.clientStatus)
@@ -103,8 +122,12 @@ class Pool extends pg.Pool {
                 // Try again...
                 client = await super.connect(...args);
             };
-            if (! client) return;
-            return new Proxy(client, {
+
+            if (! client) return; // Couldn't obtain new one
+
+
+            // Proxy-wrap:
+            client = new Proxy(client, {
                 get(target, prop, receiver) {
                     const value = Reflect.get(target, prop, receiver);
                     if (
@@ -126,6 +149,23 @@ class Pool extends pg.Pool {
                 }
             });
 
+            if (
+                this.autoCancel
+                && this.defunctPIDs.length
+            ) {
+                for (let pid of this.defunctPIDs) {
+                    try {
+                        void await client.query(
+                            "SELECT pg_cancel_backend($1);"
+                            , [pid]
+                        );
+                    } catch (err) {}; // (Just attempt)
+                };
+                this.defunctPIDs.length = 0;
+            };
+
+            return client;
+
         } catch (err) {
             // Emit failed connection attempt errors.
             this.emit("error", err, null);
@@ -133,34 +173,78 @@ class Pool extends pg.Pool {
         };
     };//}}}
 
+    // Implement our own query method since paren's once rely in original
+    // client implementation.
+    async query(...args) {//{{{
+        /// // It was too beautiful to be real:
+        /// return super.query.apply(this, args);
+        let retval, error;
+        const client = await this.connect();
+        retval = await client.query(...args);
+        client.release();
+            // One may think we need to capture errors over query execution to ensure release is done.
+            // But this is automatically done in the error handler.
+        return retval;
+    };//}}}
+
     async end(...args) {//{{{
         while (this._pendingQueue.length) {
             const pendingItem = this._pendingQueue.pop();
             pendingItem.callback(new Error("Pool is going down"));
         };
-        // Don't need this!!{{{
-        ///console.log(this);
-        // this._clients.map(c=>c.end((err)=>{
-        //     console.log(
-        //         err ? "❌ Connection closed with errors"
-        //         : "✅ Connection successfully closed"
-        //     );
-        //
-        // }));}}}
         super.end(...args);
     };//}}}
 
-    async recover() {
-        const targetClients = this._clients.filter(isDefunct);
+    async recover() {//{{{
+        const targetClients = this._clients.filter(clientIsDefunct);
         if (! targetClients.length) return false; // Nothing to recover.
         while (targetClients.length) {
-            await targetClients.pop().release();
+            const defunctClient = targetClients.pop();
+            if (this.autoCancel) {
+                // Annotate remote PID:
+                this.defunctPIDs.push(defunctClient.processID);
+            };
+            try {
+                await defunctClient.release();
+            } catch (err) {};  // NOP in case already released.
             if ( // Not working
-                this._clients.filter(isDefunct) >= targetClients.length
+                this._clients.filter(clientIsDefunct) >= targetClients.length
             ) break;
         };
         return targetClients.length == 0; // Full success.
-    };
+    };//}}}
+
+    watchForConnection(err = false) {//{{{
+        if (this.connectionWatcher) return; // Allow single watcher at any time
+        let reportConnection = ! err;
+        let reportDisconnection = true;
+        this.connectionWatcher = setInterval(
+            async () => {
+                if (! await this.isAlive()) {
+                    this.connectionError = true;
+                    if (reportDisconnection) {
+                        this.emit("error", new Error("Server host not reachable"));
+                        reportDisconnection = false; // Report only once.
+                        reportConnection = true;
+                    };
+                } else {
+                    this.connectionError = false;
+                    if (reportConnection) this.emit("ready", {
+                        message: "Server host is reachable.",
+                        // FIXME: Add more data to propperly identify the pool.
+                    });
+                    clearInterval(this.connectionWatcher);
+                    this.connectionWatcher = null;
+                    if (this.autoCancel && this.defunctPIDs.length) {
+                        // Give opportunity for disconnected clients cancellation:
+                        this.connect().then(c=>c.release());
+                    };
+                };
+            }
+            , this.reconnectInterval
+        );
+    };//}}}
+
 
 };
 

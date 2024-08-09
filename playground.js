@@ -4,14 +4,21 @@ const {Pool} = require("./custom_pg.js");
 const connection_cfg = {
     ...require("./test/db_connection.js"),
 
+    autoRecover: true, // Enable our high availability feature!
+    autoCancel: true,
+
+    max: 4,
+
+
     // application_name?: string, // The name of the application that created this Client instance
 
     // connectionTimeoutMillis?: number, // number of milliseconds to wait for connection, default is no timeout
     /////connectionTimeoutMillis: 1000,
 
     // statement_timeout?: number, // number of milliseconds before a statement in query will time out, default is no timeout
+////statement_timeout: 5000,
     // query_timeout?: number, // number of milliseconds before a query call will timeout, default is no timeout
-/////    query_timeout: 5100,
+ ////  query_timeout: 5100,
 
     // lock_timeout?: number, // number of milliseconds a query is allowed to be en lock state before it's cancelled due to lock timeout
     ////lock_timeout: 100, // ✅ No ens afecta.
@@ -21,21 +28,34 @@ const connection_cfg = {
 
 const pool = new Pool(connection_cfg);
 
+false &&
+pool.on('ready', function(ev) {
+    console.log(` 🔔 Ready!!!: `, ev.message); //, client);
+});
+
+false &&
+pool.on('allErrors', function(err, client) {
+    console.log(` 🔔${client ? "🔔" : "-"}  Error: ${err.message}`); //, client);
+});
+
+false &&
 pool.on('connect', function(client) {
     console.log(` 🔔 Connect: `); //, client);
 });
+false &&
 pool.on('acquire', function(client) {
     console.log(` 🔔 Acquire: `); //, client);
 });
-pool.on('allErrors', function(err, client) {
-    console.log(` 🔔🔔  Error: ${err.message}`); //, client);
+
+false &&
+pool.on('error', function(err, client) {
+    console.log(` 🔔 Error: ${err.message}`); //, client);
 });
-// pool.on('error', function(err, client) {
-//     console.log(` 🔔 Error: ${err.message}`); //, client);
-// });
+false &&
 pool.on('release', function(err, client) {
     console.log(` 🔔 Release: ${err? err.message : "No Errors"}`); //, client);
 });
+false &&
 pool.on('remove', function(client) {
     console.log(` 🔔 Remove: `); //, client);
 });
@@ -60,17 +80,12 @@ function addConnection() {
     pool.connect().then(wireConnection).catch(failConnection);
 };
 
-addConnection();
-addConnection();
-addConnection();
-addConnection();
-addConnection();
-addConnection();
-addConnection();
-addConnection();
-addConnection();
-addConnection();
-addConnection();
+// addConnection();
+// addConnection();
+// addConnection();
+// addConnection();
+// addConnection();
+// addConnection();
 
 
 

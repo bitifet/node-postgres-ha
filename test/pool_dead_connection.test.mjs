@@ -15,6 +15,20 @@ const {clientStatus} = customPg.Pool;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 
+
+// Cancelling notes:
+// -----------------
+//
+// const pid = pool._clients[0]?.processID  //-> Get remote PID.
+//
+// select pg_cancel_backend(pid); //-> Cancel query by connection PID.
+//
+// Checking cancellation:
+//
+// SELECT pid, state, query FROM pg_stat_activity WHERE pid = <PID>;
+
+
+
 Object.entries(implementations).forEach(([poolName, poolClass]) => {
 
     describe(`Testing ${poolName} implementation`, function() {
