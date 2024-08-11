@@ -1,0 +1,28 @@
+{
+  "name": "ha-pg",
+  "version": "0.0.1",
+  "description": "",
+  "keywords": [
+    "database",
+    "libpq",
+    "pg",
+    "postgre",
+    "postgres",
+    "postgresql",
+    "rdbms",
+    "high-availability"
+  ],
+  "main": "node_postgres_ha.js",
+  "scripts": {
+    "test": "mocha test/index.ha.mjs",
+    "test_mainstream": "mocha test/index.mainstream.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+  },
+  "devDependencies": {
+    "mocha": "^10.7.0"
+  }
+}

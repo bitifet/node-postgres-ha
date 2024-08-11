@@ -1,16 +1,10 @@
 
-import Pg from "pg";
-import customPg from "../custom_pg.js";
-import connectionConfig from "./db_connection.js";
+import node_postgres_ha from "../node_postgres_ha.js";
 import assert from "assert";
 
-const implementations = {
-    customPool: customPg.Pool,
-    pgPool: Pg.Pool,
-};
 
 // Handy method to glimpse client status;
-const {clientStatus} = customPg.Pool;
+const {clientStatus} = node_postgres_ha.Pool;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -29,7 +23,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 
 
-Object.entries(implementations).forEach(([poolName, poolClass]) => {
+export default function deadPool_tests(poolName, {Pool}) {
 
     describe(`Testing ${poolName} implementation`, function() {
         let pool;
@@ -37,8 +31,7 @@ Object.entries(implementations).forEach(([poolName, poolClass]) => {
 
 
         beforeEach(async function() {//{{{
-            pool = new poolClass({
-                ...connectionConfig,
+            pool = new Pool({
                 max: 2, // Allow up to 2 clients.
             });
             clients = new Set();
@@ -197,5 +190,5 @@ Object.entries(implementations).forEach(([poolName, poolClass]) => {
 
     });
 
-});
+};
 

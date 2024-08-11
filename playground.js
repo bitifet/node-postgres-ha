@@ -1,8 +1,7 @@
 
-const {Pool} = require("./custom_pg.js");
+const {Pool} = require("./node_postgres_ha.js");
 
 const connection_cfg = {
-    ...require("./test/db_connection.js"),
 
     autoRecover: true, // Enable our high availability feature!
     autoCancel: true,
@@ -114,9 +113,19 @@ async function testConnection(c, label = "??", {secs = 5} = {}) {
     };
 };
 
+function query(...args) {
+
+    pool.query(...args)
+        .then(({rows})=>console.log("✅", rows))
+        .catch(err=>console.error("❌", err.message))
+    ;
+
+};
+
 
 module.exports = {
     pool,
+    query,
     connections,
     getPromiseState,
     testConnection,
