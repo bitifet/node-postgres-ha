@@ -62,7 +62,7 @@ mainstream node-postgres repository.
 
     - All its clients error events (passing also the client).
                    
-  * Implemented new recover() method to wisely attempt to free released clients.
+  * Implemented new recover() method to wisely attempt to free clients in ended state.
 
 
   * Added new option "autoRecover" (default false) which, if set to true, make
