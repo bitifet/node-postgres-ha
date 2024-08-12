@@ -2,6 +2,11 @@
   "name": "ha-pg",
   "version": "0.0.1",
   "description": "",
+  "main": "node_postgres_ha.js",
+  "scripts": {
+    "test": "mocha test/index.ha.mjs",
+    "test_mainstream": "mocha test/index.mainstream.mjs"
+  },
   "keywords": [
     "database",
     "libpq",
@@ -12,12 +17,10 @@
     "rdbms",
     "high-availability"
   ],
-  "main": "node_postgres_ha.js",
-  "scripts": {
-    "test": "mocha test/index.ha.mjs",
-    "test_mainstream": "mocha test/index.mainstream.mjs"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bitifet/node-postgres-ha"
   },
-  "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {

@@ -14,9 +14,10 @@ Many of those issues are:
   * Clients not being released after network issues (so that the pool may end
     up with no usable clients).
 
-  * Clients being usable after releasing (release() method throws an error if
-    called twice, but the client can still be queried if the reference is kept
-    (I know: it shouldn't).
+  * Clients can be queried after their *release()* method being called. Ok:
+    they should not and, if so, it's not a node-postgres fault. But actively
+    preventing it could avoid hard to debug issues in case of a client
+    reference being accidentally kept.
 
   * Impossibility to detect network disconnection or high latency issues.
     - Specially with no connection timeout, in which case queries last forever
@@ -25,15 +26,16 @@ Many of those issues are:
   * (I'll complete the list as I remember...)
 
 
-For now it oly provides an enhanced *Pool* implemented as a wrapper over the
-original node-postgres' one.
+For now, node-postgres-ha oly provides an enhancenment for the *Pool* class
+implemented as a wrapper over the original node-postgres' one.
 
 Most, if not all, of the issues it tackles, would be better addressed as issues
-/ PR's to the node-postgres itself. But that would have required a lot of time.
+/ PR's to the node-postgres repository itself. But that would have required a
+lot of time.
 
 By now, this wrapper solves the problem to me (and hopefully to other
 people...) while, at the same time, it may serve as a cleaner base to reason
-about each issue separatedly before moving them as issues and/or PRs to
+about each issue separately before moving them as issues and/or PRs to
 mainstream node-postgres repository.
 
 
