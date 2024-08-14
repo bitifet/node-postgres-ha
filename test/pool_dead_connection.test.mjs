@@ -27,14 +27,11 @@ export default function deadPool_tests(poolName, {Pool}) {
 
     describe(`Testing ${poolName} implementation`, function() {
         let pool;
-        let clients;
+        let clients = [];
 
 
         beforeEach(async function() {//{{{
-            pool = new Pool({
-                max: 2, // Allow up to 2 clients.
-            });
-            clients = new Set();
+            clients.length = 0;
         });//}}}
 
         afterEach(async function() {//{{{
@@ -53,55 +50,40 @@ export default function deadPool_tests(poolName, {Pool}) {
             };
         });//}}}
 
+        function createPool(options = {}) {//{{{
+            pool = new Pool({
+                // Default options
+                max: 2, // Allow up to 2 clients.
+                // Per-test options:
+                ...options
+            });
+        };//}}}
 
-        // ✅ Already passing in original pg.Pool
-        // ======================================
+        async function createClient() {//{{{
+            const newClient = await pool.connect();
+            clients.push(newClient);
+            return newClient;
+        };//}}}
 
-        false &&
-        it('Should accept two concurrent clients', async function() {//{{{
-            pool.connect().then(cl=>clients.add(cl));
-            pool.connect().then(cl=>clients.add(cl));
-            await sleep(50);
-            assert.equal(clients.size, 2, "Clients 0 and 1 created");
-            assert.equal(pool._clients.length, 2, "Pool has exactly 2 clients");
-            assert.equal(
-                [...clients].map(clientStatus).findIndex(cl=>!cl.queryable)
-                , -1
-                , "Both clinents are queryable"
-            );
-        });//}}}
+        function releaseClient(client) {//{{{
+            const clientPosition = clients.findIndex(cl=>Object.is(cl, client));
+            client.release();
+            clients.splice(clientPosition, 1); // (-1 removves last)
+        };//}}}
 
-        false &&
-        it('Should accept more client requests', async function() {//{{{
-            await pool.connect().then(cl=>clients.add(cl));
-            await pool.connect().then(cl=>clients.add(cl));
-            pool.connect().then(cl=>clients.add(cl)); await sleep(10);
-            assert.equal(clients.size, 2, "Only 2 clients delivered");
-            assert.equal(pool._clients.length, 2, "Pool has exactly 2 clients");
-            assert.equal(pool._pendingQueue.length, 1, "Pool has exactly 1 pending clients to deliver");
-        });//}}}
 
-        false &&
-        it('Should assign released clients', async function() {//{{{
-            await pool.connect().then(cl=>clients.add(cl));
-            await pool.connect().then(cl=>clients.add(cl));
-            pool.connect().then(cl=>clients.add(cl)); await sleep(10);
-            await [...clients][0].release();
-            assert.equal(clients.size, 2, "Still only 2 different clients delivered");
-            assert.equal(pool._clients.length, 2, "Pool still has exactly 2 clients");
-            assert.equal(pool._pendingQueue.length, 0, "Now Pool has exactly 0 pending clients to deliver");
-        });//}}}
 
         // ❌ Failing in original pg_pool
         // ==============================
 
         it('Client instance cannot be reused after releasing', async function() {//{{{
-            const myClient = await pool.connect();
-            myClient.release();
+            createPool();
+            const keptClient = await createClient();
+            releaseClient(keptClient); // But we keep a reference
             let result = null;
             let gotcha = false;
-            try {
-                result = await myClient.query("select 'bar' as foo");
+            try { // Should throw when attempting to use released client:
+                result = await keptClient.query("select 'bar' as foo");
             } catch (err) {
                 gotcha = true
             };
@@ -110,13 +92,18 @@ export default function deadPool_tests(poolName, {Pool}) {
         });//}}}
 
         it('Should end with pendig client requests', async function() {//{{{
-            await pool.connect().then(cl=>clients.add(cl));
-            await pool.connect().then(cl=>clients.add(cl));
-            pool.connect().then(cl=>clients.add(cl)); await sleep(10);
-            assert.equal(clients.size, 2, "Only 2 clients delivered");
-            assert.equal(pool._clients.length, 2, "Pool has exactly 2 clients");
+            createPool({
+                max: 2, // Ensure maximum of 2 clients.
+            });
+            const resolveableClients = [
+                createClient(),
+                createClient(),
+            ];
+            const thirdClientPromise = createClient();
             assert.equal(pool._pendingQueue.length, 1, "Pool has exactly 1 pending clients to deliver");
-            await pool.end();
+            await Promise.all(resolveableClients);
+            assert.equal(clients.length, 2, "We still have two client refereces");
+            await pool.end(); // <--- This should resolve
         });//}}}
 
         it('Should end with ongoing queries', async function() {//{{{
@@ -131,11 +118,12 @@ export default function deadPool_tests(poolName, {Pool}) {
             //     };
             // };
             //
-            await pool.connect().then(cl=>clients.add(cl));
-            await pool.connect().then(cl=>clients.add(cl));
+            createPool();
+            await createClient();
+            await createClient();
             const waitSeconds = 5;
             const t0 = Date.now();
-            [...clients].forEach(
+            clients.forEach(
                 cl=>cl.query("select pg_sleep($1)", [waitSeconds])
             );
             await pool.end();
@@ -147,6 +135,7 @@ export default function deadPool_tests(poolName, {Pool}) {
         });//}}}
 
         it('Should detect errors on clients', async function() {//{{{
+            createPool();
 
             let errorHappened = false;
             let errorDetected = false;
@@ -155,18 +144,17 @@ export default function deadPool_tests(poolName, {Pool}) {
             pool.on("error", errHandler);
                 // Just to establish it is not reported.
             pool.on("allErrors", errHandler);
-                // Client errors will be mapped throug this new event.
+                // Client errors will be mapped through this new event.
 
             pool.on("error", function (err) {
                 errorDetected = true;
             });
 
-            pool.connect().then(cl=>clients.add(cl));
-            pool.connect().then(cl=>clients.add(cl));
-            await sleep(50);
+            await createClient();
+            await createClient();
 
             try {
-                await [...clients][0].query("select willFail from nonexistent");
+                await [...clients][0].query("INVALID SQL QUERY");
             } catch (err) {
                 errorHappened = true;
             };
@@ -187,6 +175,8 @@ export default function deadPool_tests(poolName, {Pool}) {
 
         //❓ Ongoing checking...
         // =====================
+
+
 
     });
 

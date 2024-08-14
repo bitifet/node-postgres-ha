@@ -22,7 +22,7 @@
     "url": "https://github.com/bitifet/node-postgres-ha"
   },
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
   },
   "devDependencies": {
