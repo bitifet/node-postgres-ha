@@ -3,12 +3,6 @@ import node_postgres_ha from "../node_postgres_ha.js";
 import assert from "assert";
 
 
-// Handy method to glimpse client status;
-const {clientStatus} = node_postgres_ha.Pool;
-
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-
 
 // Cancelling notes:
 // -----------------
@@ -24,6 +18,52 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 
 export default function deadPool_tests(poolName, {Pool}) {
+
+
+    // Miscellaneous helpers:
+    // ----------------------
+
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Check for an (un)expected error:
+    const E = pattern => err => {
+        // Test for expected error:
+        if (err.message.match(pattern)) return true;
+        throw err; // Rethrow so we can see the actual error
+    };
+
+    // Wait for a promise to resovle:
+    const waitFor = async (p, ms = 100)=>{
+        let resolved = false;
+        return await Promise.race([
+            p.then(()=>true), // Don't catch (errors not expected here)
+            sleep(ms).then(()=>false),
+        ]);
+    };
+
+    // Simulate connection failure for given client(s):
+    async function disconnect(...clients) {
+        return await Promise.all(
+            clients.map(cl=>cl.connection.stream.destroy())
+        );
+    };
+
+
+    async function isCancelled(pid) {
+        const p = new Pool({allowExitOnIdle: true});
+        const {rows: [{cancelled}]} = await p.query(
+            "SELECT count(1) = 0 as cancelled FROM pg_stat_activity WHERE pid = $1"
+            , [pid]
+        );
+        p.end();
+        return cancelled;
+    };
+
+
+
+
+
+
 
     describe(`Testing ${poolName} implementation`, function() {
         let pool;
@@ -54,6 +94,7 @@ export default function deadPool_tests(poolName, {Pool}) {
             pool = new Pool({
                 // Default options
                 max: 2, // Allow up to 2 clients.
+                allowExitOnIdle: true,
                 // Per-test options:
                 ...options
             });
@@ -70,7 +111,6 @@ export default function deadPool_tests(poolName, {Pool}) {
             client.release();
             clients.splice(clientPosition, 1); // (-1 removves last)
         };//}}}
-
 
 
         // ❌ Failing in original pg_pool
@@ -172,6 +212,27 @@ export default function deadPool_tests(poolName, {Pool}) {
 
 
         });//}}}
+
+        it ("autoRecover works", async function() {//{{{
+            createPool({autoRecover: true});
+            const client1 = await createClient();
+            const client2 = await createClient();
+            await disconnect(client1);
+            await assert.rejects(
+                ()=>client1.query("seelect now()")
+                , E(/connection terminated/i)
+                , "Disconnected client throws on usage attempt"
+            );
+            await assert.doesNotReject(
+                ()=>client2.query("select now()")
+                , E(/./)
+                , "Alive client does not throw"
+            );
+            const endedClients = pool._clients.filter(cl=>cl._ended).length;
+            assert(endedClients == 0, "No clients in ended status");
+            assert(await waitFor(createClient()), "New client can be obtained");
+        });//}}}
+
 
         //❓ Ongoing checking...
         // =====================
