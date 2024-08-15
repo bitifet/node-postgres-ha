@@ -11,7 +11,7 @@ class Pool extends pg.Pool {
         autoCancel = false,    // Attempt to remote cancel defunct client's queries.
         reconnectInterval = 5000,
         ...options
-    }, ...args) {
+    } = {}, ...args) {
         super(options, ...args);
         this.autoRecover = !! autoRecover;
         this.autoCancel = !! autoCancel;
