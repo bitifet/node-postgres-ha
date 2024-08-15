@@ -1,69 +1,11 @@
-
-import node_postgres_ha from "../node_postgres_ha.js";
 import assert from "assert";
 
 
 
-// Cancelling notes:
-// -----------------
-//
-// const pid = pool._clients[0]?.processID  //-> Get remote PID.
-//
-// select pg_cancel_backend(pid); //-> Cancel query by connection PID.
-//
-// Checking cancellation:
-//
-// SELECT pid, state, query FROM pg_stat_activity WHERE pid = <PID>;
-
+import {sleep, E, waitFor, disconnect, isCancelled} from "./test_helpers.mjs";
 
 
 export default function deadPool_tests(poolName, {Pool}) {
-
-
-    // Miscellaneous helpers:
-    // ----------------------
-
-    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-    // Check for an (un)expected error:
-    const E = pattern => err => {
-        // Test for expected error:
-        if (err.message.match(pattern)) return true;
-        throw err; // Rethrow so we can see the actual error
-    };
-
-    // Wait for a promise to resovle:
-    const waitFor = async (p, ms = 100)=>{
-        let resolved = false;
-        return await Promise.race([
-            p.then(()=>true), // Don't catch (errors not expected here)
-            sleep(ms).then(()=>false),
-        ]);
-    };
-
-    // Simulate connection failure for given client(s):
-    async function disconnect(...clients) {
-        return await Promise.all(
-            clients.map(cl=>cl.connection.stream.destroy())
-        );
-    };
-
-
-    async function isCancelled(pid) {
-        const p = new Pool({allowExitOnIdle: true});
-        const {rows: [{cancelled}]} = await p.query(
-            "SELECT count(1) = 0 as cancelled FROM pg_stat_activity WHERE pid = $1"
-            , [pid]
-        );
-        p.end();
-        return cancelled;
-    };
-
-
-
-
-
-
 
     describe(`Testing ${poolName} implementation`, function() {
         let pool;
@@ -113,25 +55,22 @@ export default function deadPool_tests(poolName, {Pool}) {
         };//}}}
 
 
+
         // ❌ Failing in original pg_pool
         // ==============================
 
-        it('Client instance cannot be reused after releasing', async function() {//{{{
+        it('Client instance cannot be reused after being released', async function() {//{{{
             createPool();
             const keptClient = await createClient();
             releaseClient(keptClient); // But we keep a reference
-            let result = null;
-            let gotcha = false;
-            try { // Should throw when attempting to use released client:
-                result = await keptClient.query("select 'bar' as foo");
-            } catch (err) {
-                gotcha = true
-            };
-            assert.strictEqual(result, null, "Result cannot be obtained");
-            assert.strictEqual(gotcha, true, "Error is thrown");
+            await assert.rejects(
+               async ()=>await keptClient.query("select now()")
+               , E(/\.query is not a function/)
+               , "Should throw when attempting to use released client."
+            );
         });//}}}
 
-        it('Should end with pendig client requests', async function() {//{{{
+        it('Pool should end with pendig client requests', async function() {//{{{
             createPool({
                 max: 2, // Ensure maximum of 2 clients.
             });
@@ -140,13 +79,13 @@ export default function deadPool_tests(poolName, {Pool}) {
                 createClient(),
             ];
             const thirdClientPromise = createClient();
-            assert.equal(pool._pendingQueue.length, 1, "Pool has exactly 1 pending clients to deliver");
+            await assert.equal(pool._pendingQueue.length, 1, "Pool has exactly 1 pending clients to deliver");
             await Promise.all(resolveableClients);
-            assert.equal(clients.length, 2, "We still have two client refereces");
+            await assert.equal(clients.length, 2, "We still have two client refereces");
             await pool.end(); // <--- This should resolve
         });//}}}
 
-        it('Should end with ongoing queries', async function() {//{{{
+        it('Pool should end with ongoing queries', async function() {//{{{
             // This test fails in original pg.Pool
             //
             // Just overloading the end() method for doing nothing misteriously
@@ -168,13 +107,13 @@ export default function deadPool_tests(poolName, {Pool}) {
             );
             await pool.end();
             const elapsed = Date.now() - t0;
-            assert(
+            await assert(
                 elapsed < waitSeconds * 1000
                 , "Clients relased before query ends"
             );
         });//}}}
 
-        it('Should detect errors on clients', async function() {//{{{
+        it('Pool should detect errors on clients', async function() {//{{{
             createPool();
 
             let errorHappened = false;
@@ -199,12 +138,12 @@ export default function deadPool_tests(poolName, {Pool}) {
                 errorHappened = true;
             };
 
-            assert.strictEqual(
+            await assert.strictEqual(
                 errorHappened
                 , true
                 , "Intentional error should happen"
             );
-            assert.strictEqual(
+            await assert.strictEqual(
                 errorDetected
                 , true
                 , "Intentional error should be detected"
@@ -213,13 +152,13 @@ export default function deadPool_tests(poolName, {Pool}) {
 
         });//}}}
 
-        it ("autoRecover works", async function() {//{{{
+        it ("Config option 'autoRecover' works", async function() {//{{{
             createPool({autoRecover: true});
             const client1 = await createClient();
             const client2 = await createClient();
             await disconnect(client1);
             await assert.rejects(
-                ()=>client1.query("seelect now()")
+                async ()=>await client1.query("seelect now()")
                 , E(/connection terminated/i)
                 , "Disconnected client throws on usage attempt"
             );
@@ -229,8 +168,48 @@ export default function deadPool_tests(poolName, {Pool}) {
                 , "Alive client does not throw"
             );
             const endedClients = pool._clients.filter(cl=>cl._ended).length;
-            assert(endedClients == 0, "No clients in ended status");
-            assert(await waitFor(createClient()), "New client can be obtained");
+            await assert(endedClients == 0, "No clients in ended status");
+            await assert(await waitFor(createClient()), "New client can be obtained");
+        });//}}}
+
+        it ("Config option 'autoCancel' works", async function() {//{{{
+            createPool({
+                autoRecover: true,
+                autoCancel: true,
+                max: 2,
+            });
+
+            // Create two clients;
+            const client1 = await createClient();
+            const client2 = await createClient();
+
+            const pid1 = client1?.processID;
+
+            const long_run_query = client1.query("select pg_sleep(5)");
+
+            await disconnect(client1);  // Simulate network disconnection
+
+            await assert.rejects(
+                long_run_query
+                , E(/connection terminated/i)
+                , "Query is rejected on network error"
+            );
+
+            await assert(
+                ! await isCancelled(pid1)
+                , "Not yet cancelled (we don't know if we could connect)"
+            );
+
+            await assert(
+                await waitFor(createClient())
+                , "New client can be obtained"
+            );
+
+            await assert(
+                await isCancelled(pid1)
+                , "First dispatched client used to effectively cancel pending query"
+            );
+
         });//}}}
 
 

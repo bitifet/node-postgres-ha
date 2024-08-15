@@ -1,6 +1,6 @@
-import deadPool_tests from "./pool_dead_connection.test.mjs";
+import pool_resilience_tests from "./pool_resilience.test.mjs";
 
 import node_postgres from "pg";
 
-deadPool_tests("node_postgres", node_postgres);
+pool_resilience_tests("node_postgres", node_postgres);
 
