@@ -173,17 +173,28 @@ class Pool extends pg.Pool {
         };
     };//}}}
 
-    // Implement our own query method since paren's once rely in original
+    // Implement our own query method since parent's once rely in original
     // client implementation.
     async query(...args) {//{{{
         /// // It was too beautiful to be real:
         /// return super.query.apply(this, args);
-        let retval, error;
+        let retval;
         const client = await this.connect();
-        retval = await client.query(...args);
+        try {
+            retval = await client.query(...args);
+        } catch (err) {
+            try {
+                client.release();
+                // One may think we don't need to capture errors over query
+                // execution since it will be automatically done by calling
+                // recover() on error events.
+                // BUT this only happen if the client goes to the ended state
+                // (typically due to connection errors). NOT due to regular
+                // errors such as statement error.
+            } catch (err) { /* Just attempt */ };
+            throw err; // Throw original error instead.
+        };
         client.release();
-            // One may think we need to capture errors over query execution to ensure release is done.
-            // But this is automatically done in the error handler.
         return retval;
     };//}}}
 
