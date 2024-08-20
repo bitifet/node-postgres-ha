@@ -233,7 +233,7 @@ class Pool extends pg.Pool {
 
     async isAlive () {//{{{
         return await new Promise((resolve) => {
-            const host = this.options.host || "localhsot";
+            const host = this.options.host || "localhost";
             const port = this.options.port || 5432;
                 // 👆 FIXME: These should go in sync with node-postgres
             const socket = new net.Socket();
@@ -270,31 +270,34 @@ class Pool extends pg.Pool {
         if (this.connectionWatcher) return; // Allow single watcher at any time
         let reportConnection = ! err;
         let reportDisconnection = true;
-        this.connectionWatcher = setInterval(
-            async () => {
-                if (! await this.isAlive()) {
-                    this.connectionError = true;
-                    if (reportDisconnection) {
-                        this.emit("error", new Error("Server host not reachable"));
-                        reportDisconnection = false; // Report only once.
-                        reportConnection = true;
-                    };
-                } else {
-                    this.connectionError = false;
-                    if (reportConnection) this.emit("ready", {
-                        message: "Server host is reachable.",
-                        // FIXME: Add more data to propperly identify the pool.
-                    });
-                    clearInterval(this.connectionWatcher);
-                    this.connectionWatcher = null;
-                    if (this.autoCancel && this.defunctPIDs.length) {
-                        // Give opportunity for disconnected clients cancellation:
-                        this.connect().then(c=>c.release());
-                    };
+        const connectionCheck = async () => {
+            if (! await this.isAlive()) {
+                this.connectionError = true;
+                if (reportDisconnection) {
+                    this.emit("error", new Error("Server host not reachable"));
+                    reportDisconnection = false; // Report only once.
+                    reportConnection = true;
                 };
-            }
+            } else {
+                this.connectionError = false;
+                if (reportConnection) this.emit("ready", {
+                    message: "Server host is reachable.",
+                    // FIXME: Add more data to propperly identify the pool.
+                });
+                clearInterval(this.connectionWatcher);
+                this.connectionWatcher = null;
+                if (this.autoCancel && this.defunctPIDs.length) {
+                    // Give opportunity for disconnected clients cancellation:
+                    this.connect().then(c=>c.release());
+                };
+            };
+        };
+        this.connectionWatcher = setInterval(
+            connectionCheck
             , this.reconnectInterval
         );
+        // Check immediately on startup:
+        if (reportConnection) connectionCheck();
     };//}}}
 
 };
