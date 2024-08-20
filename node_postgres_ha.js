@@ -1,6 +1,15 @@
 
 const pg = require("pg");
-const {serverIsReachable, clientIsDefunct} = require("./lib/helpers");
+const net = require("net");
+
+const PING_MESSAGE = Buffer.from([
+    0x00, 0x00, 0x00, 0x08, // Packet length
+    0x00, 0x00, 0x00, 0x00  // Non existent Postgres version
+]);
+const PONG_PATTERN = "SFATAL";
+const PING_TIMEOUT = 1000; // Maximum ms to wait for ping connection.
+
+const clientIsDefunct = cl=>!!cl._ended;
 
 
 class Pool extends pg.Pool {
@@ -17,7 +26,6 @@ class Pool extends pg.Pool {
         this.autoCancel = !! autoCancel;
         this.reconnectInterval = Number(reconnectInterval);
         this.defunctPIDs = [];
-        this.isAlive = serverIsReachable.bind(null, this.options.host, this.options.port);
         this.connectionError = false;
         this.connectionWatcher = null;
 
@@ -57,8 +65,6 @@ class Pool extends pg.Pool {
         this.on("allErrors", this.watchForConnection.bind(this));
 
     };//}}}
-
-
 
     // Add static method to extract client overall status:
     static clientStatus(c) {//{{{
@@ -225,6 +231,41 @@ class Pool extends pg.Pool {
         return targetClients.length == 0; // Full success.
     };//}}}
 
+    async isAlive () {//{{{
+        return await new Promise((resolve) => {
+            const host = this.options.host || "localhsot";
+            const port = this.options.port || 5432;
+                // 👆 FIXME: These should go in sync with node-postgres
+            const socket = new net.Socket();
+            const timer = setTimeout(() => {
+                ///console.log(" 🕒 Timeout!!!");
+                if (! socket.destroyed) socket.destroy();
+                resolve(false);
+            }, PING_TIMEOUT);
+            socket.on("error", (err)=>{
+                ///console.log(" ❌ Error!!!", err?.message);
+                resolve(false);
+                socket.destroy();
+            });
+            socket.on("data", data => {
+                ///console.log(" 📝 DATA!!!", data.toString());
+                resolve (!! data.toString().match(PONG_PATTERN)); // Alive if matches
+                socket.end();
+            });
+            socket.on("close", (err) => {
+                ///console.log(" ✖️  Close!!!", err);
+                resolve("false");
+                    // Just in case its closed due to non expected reason.
+                clearTimeout(timer);
+            });
+            socket.on("connect", (...args)=> {
+                ///console.log(" 🔥 Connect!!!", args)
+                socket.write(PING_MESSAGE);
+            });
+            socket.connect(port, host);
+        });
+    };//}}}
+
     watchForConnection(err = false) {//{{{
         if (this.connectionWatcher) return; // Allow single watcher at any time
         let reportConnection = ! err;
@@ -255,7 +296,6 @@ class Pool extends pg.Pool {
             , this.reconnectInterval
         );
     };//}}}
-
 
 };
 
