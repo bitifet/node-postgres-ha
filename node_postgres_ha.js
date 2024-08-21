@@ -9,7 +9,8 @@ const PING_MESSAGE = Buffer.from([
 const PONG_PATTERN = "SFATAL";
 const PING_TIMEOUT = 1000; // Maximum ms to wait for ping connection.
 
-const clientIsDefunct = cl=>!!cl._ended;
+const clientIsDefunct = cl => !!cl._ended;
+const clientIsIdle = cl => !cl.activeQuery && !cl.queryQueue.length;
 
 
 class Pool extends pg.Pool {
@@ -85,6 +86,7 @@ class Pool extends pg.Pool {
             connectionError : !! _connectionError,
             queryable       : !! _queryable,
             pendingQueries  : queryQueue.length,
+            idle            : clientIsIdle(c),
         };
     };//}}}
 
@@ -95,11 +97,13 @@ class Pool extends pg.Pool {
         const free = max - used;
         const pending = this._pendingQueue.length;
         const defunct = this._clients.filter(clientIsDefunct).length;
+        const idle = this._clients.filter(clientIsIdle).length;
         const alive = this._clients.length - defunct;
         return {
             max,
             used,
             free,
+            idle,
             alive,
             defunct,
             pending,
