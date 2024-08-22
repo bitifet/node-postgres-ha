@@ -70,6 +70,49 @@ export default function deadPool_tests(poolName, {Pool}) {
             );
         });//}}}
 
+        it('Pool should NOT end with ongoing queries', async function() {//{{{
+            // ⚠️  This test (originally claiming pool should exit) was
+            // originally a mistake
+            //
+            // 👉 Obviously pools should NOT end until all clients released!!!
+            //
+            // There was no "mistery": Just I neglected to await when calling
+            // parent's end() method (that's why "overloading the end() method
+            // for doing nothing misteriously solved it").
+            //
+            // 👉 BUT: There must be a mechanism to forcibly end in case of
+            // clients not being released (i.e. if connection goes down...).
+
+            createPool();
+            await createClient();
+            await createClient();
+            const waitSeconds = .01;
+            const t0 = Date.now();
+            const ongoingQueries = Promise.all(clients.map(
+                cl=>cl.query("select pg_sleep($1)", [waitSeconds])
+            ));
+            let poolEnded = false;
+            pool.end().then(()=>poolEnded = true);
+            sleep(.01);
+            await assert.equal(
+                poolEnded
+                , false
+                , "Pool does not end before clients being released"
+            );
+            await ongoingQueries;
+
+            const elapsed = Date.now() - t0;
+            await assert(
+                elapsed >= waitSeconds * 1000
+                , "Clients relased only after query ends"
+            );
+            await assert.equal(
+                poolEnded
+                , false
+                , "Pool finally released"
+            );
+        });//}}}
+
         it('Pool should end with pendig client requests', async function() {//{{{
             createPool({
                 max: 2, // Ensure maximum of 2 clients.
@@ -78,38 +121,42 @@ export default function deadPool_tests(poolName, {Pool}) {
                 createClient(),
                 createClient(),
             ];
-            const thirdClientPromise = createClient();
-            await assert.equal(pool._pendingQueue.length, 1, "Pool has exactly 1 pending clients to deliver");
-            await Promise.all(resolveableClients);
-            await assert.equal(clients.length, 2, "We still have two client refereces");
-            await pool.end(); // <--- This should resolve
-        });//}}}
 
-        it('Pool should end with ongoing queries', async function() {//{{{
-            // This test fails in original pg.Pool
-            //
-            // Just overloading the end() method for doing nothing misteriously
-            // solves the problem (I don't know why):
-            //
-            // class Pool extends pg.Pool {
-            //     async end(...args) {
-            //         super.end(...args);
-            //     };
-            // };
-            //
-            createPool();
-            await createClient();
-            await createClient();
-            const waitSeconds = 5;
-            const t0 = Date.now();
-            clients.forEach(
-                cl=>cl.query("select pg_sleep($1)", [waitSeconds])
+            let thirdClientResolved = false;
+            createClient() // This goes to _pendingQueue
+                .then(()=>thirdClientResolved = true)
+            ;
+            await assert.equal(
+                pool._pendingQueue.length
+                , 1
+                , "Pool has exactly 1 pending clients to deliver"
             );
-            await pool.end();
-            const elapsed = Date.now() - t0;
-            await assert(
-                elapsed < waitSeconds * 1000
-                , "Clients relased before query ends"
+            await Promise.all(resolveableClients); // Clients assigned.
+            await assert.equal(
+                clients.length
+                , 2
+                , "We still have two client refereces"
+            );
+            let poolEnded = false;
+            const poolEndPromise = pool.end().then(()=>poolEnded = true).catch(console.error);
+            sleep(.01);
+            await assert.equal(
+                poolEnded
+                , false
+                , "Pool does not end before clients being released"
+            );
+            // Release in-use clients after pool.end() requested.
+            await Promise.all(clients.map(cl=>cl.release()));
+            await poolEndPromise;
+            await assert.equal(
+                poolEnded
+                , true
+                , "Pool ended after clients release"
+            );
+            await assert.equal(
+                thirdClientResolved
+                , false
+                , "Third client does not yet resolve"
             );
         });//}}}
 

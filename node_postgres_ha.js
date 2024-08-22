@@ -213,7 +213,7 @@ class Pool extends pg.Pool {
             const pendingItem = this._pendingQueue.pop();
             pendingItem.callback(new Error("Pool is going down"));
         };
-        super.end(...args);
+        await super.end(...args);
     };//}}}
 
     async recover() {//{{{
