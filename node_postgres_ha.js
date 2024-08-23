@@ -11,7 +11,12 @@ const PING_TIMEOUT = 1000; // Maximum ms to wait for ping connection.
 
 const clientIsDefunct = cl => !!cl._ended;
 const clientIsIdle = cl => !cl.activeQuery && !cl.queryQueue.length;
+const clientIsTimedOut = cl => !!(
+    cl.connectionParameters.client_timeout
+    && (Date.now() - cl.ctime) > cl.connectionParameters.client_timeout
+);
 
+const coalesce = (...args)=>args.find(x=>x!==undefined);
 
 class Pool extends pg.Pool {
 
@@ -35,8 +40,19 @@ class Pool extends pg.Pool {
         const baseClient = this.Client;
         const parentPool = this;
         this.Client = class extendedClient extends baseClient {
-            constructor(...args) {
-                super(...args);
+            constructor(cfg, ...args) {
+                super(cfg, ...args);
+                const client_timeout = coalesce(
+                    cfg.client_timeout
+                    , parentPool.options.client_timeout
+                );
+
+                if (client_timeout !== undefined) {
+                    this.connectionParameters.client_timeout = client_timeout;
+                };
+
+
+                this.ctime = Date.now();
                 this.on("error", err => parentPool.emit("allErrors", err, this)); 
             };
             async query(...args) {
@@ -87,6 +103,7 @@ class Pool extends pg.Pool {
             queryable       : !! _queryable,
             pendingQueries  : queryQueue.length,
             idle            : clientIsIdle(c),
+            timedOut        : clientIsTimedOut(c),
         };
     };//}}}
 
@@ -99,12 +116,14 @@ class Pool extends pg.Pool {
         const defunct = this._clients.filter(clientIsDefunct).length;
         const idle = this._clients.filter(clientIsIdle).length;
         const alive = this._clients.length - defunct;
+        const timedOut = this._clients.filter(clientIsTimedOut).length;
         return {
             max,
             used,
             free,
             idle,
             alive,
+            timedOut,
             defunct,
             pending,
             connErr: this.connectionError,
@@ -135,6 +154,7 @@ class Pool extends pg.Pool {
 
             if (! client) return; // Couldn't obtain new one
 
+            client.ctime = Date.now(); // Renew ctime every time reused.
 
             // Proxy-wrap:
             client = new Proxy(client, {
@@ -213,7 +233,41 @@ class Pool extends pg.Pool {
             const pendingItem = this._pendingQueue.pop();
             pendingItem.callback(new Error("Pool is going down"));
         };
-        await super.end(...args);
+        await Promise.all(
+            this._clients.filter(clientIsIdle).map(
+                async function handleIdleClient(cl) {
+                    try {
+                        const timeoutError = new Error(
+                            "Timed out client released due to Pool shutdown"
+                        );
+                        if (clientIsTimedOut(cl)) {
+                            cl.emit("error", timeoutError);
+                            return await cl.release();
+                        } else if (
+                            !! cl.connectionParameters.client_timeout
+                        ) {
+                            const pendingMs = (
+                                cl.ctime
+                                + cl.connectionParameters.client_timeout
+                                - Date.now()
+                            );
+                            return await new Promise(resolve => {
+                                setTimeout(async ()=>{
+                                    cl.emit(timeoutError);
+                                    resolve (await cl.release());
+                                }, pendingMs);
+                            });
+                        };
+                    } catch (originalError) {
+                        cl.emit("error", new Error(
+                            "Cannot release timed out idle client"
+                        ));
+                        return cl;
+                    };
+                }
+            )
+        );
+        return await super.end(...args);
     };//}}}
 
     async recover() {//{{{
