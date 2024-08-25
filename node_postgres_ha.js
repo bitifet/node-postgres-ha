@@ -11,9 +11,13 @@ const PING_TIMEOUT = 1000; // Maximum ms to wait for ping connection.
 
 const clientIsDefunct = cl => !!cl._ended;
 const clientIsIdle = cl => !cl.activeQuery && !cl.queryQueue.length;
-const clientIsTimedOut = cl => !!(
-    cl.connectionParameters.client_timeout
-    && (Date.now() - cl.ctime) > cl.connectionParameters.client_timeout
+
+const clientTimeoutMillis = cl => (
+    ! cl.connectionParameters.client_timeout ? Infinity
+    : Math.max(
+        0 // Already timed out
+        , cl.ctime + cl.connectionParameters.client_timeout - Date.now()
+    )
 );
 
 const coalesce = (...args)=>args.find(x=>x!==undefined);
@@ -84,7 +88,7 @@ class Pool extends pg.Pool {
     };//}}}
 
     // Add static method to extract client overall status:
-    static clientStatus(c) {//{{{
+    static clientStatus(cl) {//{{{
         const {
             _connecting,
             _connected,
@@ -93,7 +97,7 @@ class Pool extends pg.Pool {
             _connectionError,
             _queryable,
             queryQueue,
-        } = c;
+        } = cl;
         return {
             connecting      : !! _connecting,
             connected       : !! _connected,
@@ -102,8 +106,8 @@ class Pool extends pg.Pool {
             connectionError : !! _connectionError,
             queryable       : !! _queryable,
             pendingQueries  : queryQueue.length,
-            idle            : clientIsIdle(c),
-            timedOut        : clientIsTimedOut(c),
+            idle            : clientIsIdle(cl),
+            timedOut        : ! clientTimeoutMillis(cl),
         };
     };//}}}
 
@@ -116,7 +120,7 @@ class Pool extends pg.Pool {
         const defunct = this._clients.filter(clientIsDefunct).length;
         const idle = this._clients.filter(clientIsIdle).length;
         const alive = this._clients.length - defunct;
-        const timedOut = this._clients.filter(clientIsTimedOut).length;
+        const timedOut = this._clients.filter(cl=>!clientTimeoutMillis(cl)).length;
         return {
             max,
             used,
@@ -240,7 +244,7 @@ class Pool extends pg.Pool {
                         const timeoutError = new Error(
                             "Timed out client released due to Pool shutdown"
                         );
-                        if (clientIsTimedOut(cl)) {
+                        if (! clientTimeoutMillis(cl)) {
                             cl.emit("error", timeoutError);
                             return await cl.release();
                         } else if (
@@ -346,7 +350,7 @@ class Pool extends pg.Pool {
                 this.connectionWatcher = null;
                 if (this.autoCancel && this.defunctPIDs.length) {
                     // Give opportunity for disconnected clients cancellation:
-                    this.connect().then(c=>c.release());
+                    this.connect().then(cl=>cl.release());
                 };
             };
         };
