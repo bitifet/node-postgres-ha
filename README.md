@@ -14,14 +14,19 @@ Many of those issues are:
   * Clients not being released after network issues (so that the pool may end
     up with no usable clients).
 
-  * Clients can be queried after their *release()* method being called. Ok:
-    they should not and, if so, it's not a node-postgres fault. But actively
-    preventing it could avoid hard to debug issues in case of a client
-    reference being accidentally kept.
-
   * Impossibility to detect network disconnection or high latency issues.
     - Specially with no connection timeout, in which case queries last forever
       because they are just awaiting in the pending queue.
+
+  * Client references usable after released to the pool.
+
+  * Pools with pending client requests not resolving on pool.end() unless
+    connection timeout defined.
+
+  * Also non released clients preventing pool.end() to resolve, even when idle,
+  may be technically correct, but in many situations it may cause more harm
+  than good. Now an optional client_timeout option allow to limit the time they
+  can prevent the pool from ending (⚠️  Use with caution).
 
   * (I'll complete the list as I remember...)
 
@@ -66,12 +71,10 @@ mainstream node-postgres repository.
                    
   * Implemented new recover() method to wisely attempt to free clients in ended state.
 
-
   * Added new option "autoRecover" (default false) which, if set to true, make
     that if a client acquisition fails, the recover() method automatically
     called and the client acquisition is retryed if succeed. It is also called
     on errors.
-
      
   * Implemented serverIsReachable() method to check network connectivity to the
     server.
@@ -83,6 +86,9 @@ mainstream node-postgres repository.
   * Implemented the ability to remotely cancel disconnected queries from the
     server after connection recovery (avoiding resource wasting to the server).
     This must be activated throug the "autoCancel" option.
+
+  * Added new "client_timeout" option that, if set, allow to purge timed out
+    clients on pool.end() if they are idle.
 
 
 > 👉 Check [this repo commit
@@ -158,6 +164,23 @@ the original implementation and to the wrapper.
 But those involving connection issues are harder to simulate. Even thought I
 have ideas of how to address it but, for now, it's still pending...
 
+
+### Better separation of concerns
+
+Add support for decorators (through rollup+babel) and reorganize code by
+issues/features as separate decorators.
+
+This will make easier to:
+
+  * Reason about each one.
+
+  * Follow them to implement the changes in a node-postgres fork to, ideally,
+    send PR's to integrate every enhancenment one by one.
+
+
+### Link mainstream node-postgres tests
+
+Automate downloading of mainstream node-postgres tests and pass them too.
 
 
 ## License
