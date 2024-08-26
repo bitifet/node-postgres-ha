@@ -9,6 +9,7 @@ const PING_MESSAGE = Buffer.from([
 const PONG_PATTERN = "SFATAL";
 const PING_TIMEOUT = 1000; // Maximum ms to wait for ping connection.
 
+const sleep = ms=>new Promise(resolve=>setTimeout(resolve, ms));
 const clientIsDefunct = cl => !!cl._ended;
 const clientIsIdle = cl => !cl.activeQuery && !cl.queryQueue.length;
 
@@ -233,44 +234,52 @@ class Pool extends pg.Pool {
     };//}}}
 
     async end(...args) {//{{{
+        if (this.ending) return await super.end(...args); // (Repetition)
+        this.ending = true; // Use mainstream mechanism to avoid new queries
+                            // and client requests.
+
         while (this._pendingQueue.length) {
             const pendingItem = this._pendingQueue.pop();
             pendingItem.callback(new Error("Pool is going down"));
         };
-        await Promise.all(
-            this._clients.filter(clientIsIdle).map(
-                async function handleIdleClient(cl) {
-                    try {
-                        const timeoutError = new Error(
-                            "Timed out client released due to Pool shutdown"
-                        );
-                        if (! clientTimeoutMillis(cl)) {
+
+        if (
+            // client_timeout is set
+            !! this.options.client_timeout
+        ) {
+            const timeoutError = new Error(
+                "Timed out client released due to Pool shutdown"
+            );
+            const busyClients = (await Promise.all(
+                this._clients.map( // ⚠️  Cannot filter with async function
+                    async function gracefully_await_for_idle(cl) {
+                        if (cl._ending) return false;
+                        ///if (cl._connecting) return cl;
+                        await sleep(clientTimeoutMillis(cl));
+                        if (clientIsIdle(cl)) {
+                            try {
+                                this.ending = false;
+                                await cl.release();
+                                this.ending = true;
+                            } catch (originalError) {
+                                cl.emit("error", new Error(
+                                    "Cannot release timed out idle client"
+                                ));
+                                // NOTE: If client is still connecting,
+                                // release() method won't exist yet.
+                                return cl;
+                            };
                             cl.emit("error", timeoutError);
-                            return await cl.release();
-                        } else if (
-                            !! cl.connectionParameters.client_timeout
-                        ) {
-                            const pendingMs = (
-                                cl.ctime
-                                + cl.connectionParameters.client_timeout
-                                - Date.now()
-                            );
-                            return await new Promise(resolve => {
-                                setTimeout(async ()=>{
-                                    cl.emit(timeoutError);
-                                    resolve (await cl.release());
-                                }, pendingMs);
-                            });
+                            return false;
                         };
-                    } catch (originalError) {
-                        cl.emit("error", new Error(
-                            "Cannot release timed out idle client"
-                        ));
                         return cl;
-                    };
-                }
-            )
-        );
+                    }.bind(this)
+                )
+            )).filter(x=>x); // 👍 ...but can filter after all resolved
+        };
+
+
+        this.ending = false; // Let super.end() know this is the first call.
         return await super.end(...args);
     };//}}}
 
