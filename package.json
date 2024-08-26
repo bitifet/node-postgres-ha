@@ -1,6 +1,6 @@
 {
   "name": "ha-pg",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "",
   "main": "node_postgres_ha.js",
   "scripts": {
@@ -8,14 +8,15 @@
     "test_mainstream": "mocha test/index.mainstream.mjs"
   },
   "keywords": [
-    "database",
-    "libpq",
-    "pg",
-    "postgre",
-    "postgres",
+    "high-availability",
     "postgresql",
+    "backend",
+    "database",
+    "postgres",
+    "postgre",
     "rdbms",
-    "high-availability"
+    "libpq",
+    "pg"
   ],
   "repository": {
     "type": "git",
@@ -23,9 +24,7 @@
   },
   "author": "",
   "license": "MIT",
-  "dependencies": {
-  },
   "devDependencies": {
-    "mocha": "^10.7.0"
+    "mocha": "^10.7.3"
   }
 }

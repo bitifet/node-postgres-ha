@@ -51,10 +51,12 @@ mainstream node-postgres repository.
 ```javascript
 > pool.status()
 {
-  max: 4,
-  used: 3,
-  free: 1,
-  alive: 3,
+  max: 10,
+  used: 4,
+  free: 6,
+  idle: 4,
+  alive: 4,
+  timedOut: 0,
   defunct: 0,
   pending: 0,
   connErr: false
