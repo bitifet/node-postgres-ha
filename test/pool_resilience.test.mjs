@@ -17,12 +17,14 @@ export default function deadPool_tests(poolName, {Pool}) {
         });//}}}
 
         afterEach(async function() {//{{{
-            pool._pendingQueue.length = 0; // Truncate pending connection promises.
-            for (const cl of pool._clients) { // Ensure all clients released:
-                try {
-                    await cl.release();
-                } catch (err) {
-                    // Just ensuring it is released
+            if (pool) {
+                pool._pendingQueue.length = 0; // Truncate pending connection promises.
+                for (const cl of pool._clients) { // Ensure all clients released:
+                    try {
+                        await cl.release();
+                    } catch (err) {
+                        // Just ensuring it is released
+                    };
                 };
             };
             try {
@@ -55,6 +57,14 @@ export default function deadPool_tests(poolName, {Pool}) {
         };//}}}
 
 
+        // 👀 Should keep working in ha-pg
+        // ==============================
+        it('Pool exts cleanly', async function() {
+            const pool = new Pool();
+            await assert(await waitFor(pool.end()), "pool.end() resolves.");
+        });
+
+        
 
         // ❌ Failing in original pg_pool
         // ==============================
@@ -270,10 +280,6 @@ export default function deadPool_tests(poolName, {Pool}) {
             }
         );//}}}
 
-
-        //❓ Ongoing checking...
-        // =====================
-
         it( 'Can finish with idle but non ended clients if timed out'//{{{
             , async function () {
                 createPool({
@@ -310,6 +316,10 @@ export default function deadPool_tests(poolName, {Pool}) {
                 );
             }
         )//}}}
+
+
+        //❓ Ongoing checking...
+        // =====================
 
 
     });
