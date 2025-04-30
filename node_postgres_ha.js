@@ -145,19 +145,17 @@ class Pool extends pg.Pool {
     //   - Capture failed connection attempt errors.
     //   - Return a proxy preventing client access after releasing.
     async connect(...args) {//{{{
+        let hasFreeConnections = !! this.status().free;
         try {
+
+            // Attempt to autorecover in case of no connections left.
+            if (
+                ! hasFreeConnections
+                && this.autoRecover
+            ) await this.recover();
+
             let client = await super.connect(...args);
             let released = false;
-            if (
-                ! client // No available clients
-                && this.autoRecover
-                && await this.recover()
-            ) {
-                // Try again...
-                client = await super.connect(...args);
-            };
-
-            if (! client) return; // Couldn't obtain new one
 
             client.ctime = Date.now(); // Renew ctime every time reused.
 
@@ -202,13 +200,19 @@ class Pool extends pg.Pool {
             return client;
 
         } catch (err) {
-            // Emit failed connection attempt errors.
-            this.emit("error", err, null);
-            throw err;
+            const finalError = (
+                hasFreeConnections ? err
+                : new Error(
+                    "No free connections available in the pool"
+                    , { cause: err }
+                )
+            );
+            this.emit("error", finalError, null);
+            throw finalError;
         };
     };//}}}
 
-    // Implement our own query method since parent's once rely in original
+    // Implement our own query method since parent's one rely in original
     // client implementation.
     async query(...args) {//{{{
         /// // It was too beautiful to be real:

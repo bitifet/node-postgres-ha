@@ -223,7 +223,7 @@ export default function deadPool_tests(poolName, {Pool}) {
                 const client2 = await createClient();
                 await disconnect(client1);
                 await assert.rejects(
-                    async ()=>await client1.query("seelect now()")
+                    async ()=>await client1.query("select now()")
                     , E(/connection terminated/i)
                     , "Disconnected client throws on usage attempt"
                 );
@@ -314,6 +314,25 @@ export default function deadPool_tests(poolName, {Pool}) {
                     queryCompleted
                     , "Query was awaited for completion before pool end"
                 );
+            }
+        )//}}}
+
+
+        it( 'Reports when pool overflows'//{{{
+            , async function () {
+                createPool({
+                    max: 2, // Ensure maximum of 2 clients.
+                    connectionTimeoutMillis: 2,
+                })
+                pool.query("select pg_sleep($1)", [.004]);
+                pool.query("select pg_sleep($1)", [.004]);
+
+                await assert.rejects(
+                    async ()=>await pool.query("select 'foo'")
+                    , E(/no free connections/i)
+                    , "Cannot connect due to no conections left in the pool"
+                );
+                await pool.end();
             }
         )//}}}
 
