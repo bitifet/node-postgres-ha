@@ -1,6 +1,6 @@
 {
   "name": "ha-pg",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "",
   "main": "node_postgres_ha.js",
   "scripts": {
