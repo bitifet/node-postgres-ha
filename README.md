@@ -59,6 +59,14 @@ mainstream node-postgres repository.
   timedOut: 0,
   defunct: 0,
   pending: 0,
+  minSpareConnections: {
+      amount: 6,
+      timestamp: 1747909783745
+  },
+  minSpareConnections_ever: {
+      amount: 4,
+      timestamp: 1747909697055
+  },
   connErr: false
 }
 ```

@@ -25,6 +25,14 @@ const coalesce = (...args)=>args.find(x=>x!==undefined);
 
 class Pool extends pg.Pool {
 
+    resetClientsPeak() {
+        if ((this._clientsLengthPeak || 1) > (this._clientsLengthPeak_ever || 0)) {
+            this._clientsLengthPeak_ever = this._clientsLengthPeak || 0;
+            this._tClientsLengthPeak_ever = Date.now();
+        }
+        this._clientsLengthPeak = this._clients.length;
+        this._tClientsLengthPeak = Date.now();
+    };
     // Overload Client implementation
     constructor({//{{{
         autoRecover = false,   // Auto-vacuum defunct clients.
@@ -39,6 +47,19 @@ class Pool extends pg.Pool {
         this.defunctPIDs = [];
         this.connectionError = false;
         this.connectionWatcher = null;
+
+        this.resetClientsPeak();
+        {
+            const updateClientsPeak = () =>{
+                if (this._clients.length > this._clientsLengthPeak) {
+                    this._clientsLengthPeak = this._clients.length;
+                    this._tClientsLengthPeak = Date.now();
+                };
+            }
+            this.on("connect" , updateClientsPeak);
+            this.on("remove" , updateClientsPeak);
+        };
+
 
         // Implement allErrors event:{{{
         // --------------------------
@@ -122,6 +143,15 @@ class Pool extends pg.Pool {
         const idle = this._clients.filter(clientIsIdle).length;
         const alive = this._clients.length - defunct;
         const timedOut = this._clients.filter(cl=>!clientTimeoutMillis(cl)).length;
+        const minSpareConnections = {
+            amount: max - this._clientsLengthPeak,
+            timestamp: this._tClientsLengthPeak,
+        };
+        const minSpareConnections_ever = {
+            amount: max - this._clientsLengthPeak_ever,
+            timestamp: this._tClientsLengthPeak_ever,
+        };
+        this.resetClientsPeak();
         return {
             max,
             used,
@@ -131,6 +161,8 @@ class Pool extends pg.Pool {
             timedOut,
             defunct,
             pending,
+            minSpareConnections,
+            minSpareConnections_ever,
             connErr: this.connectionError,
             ...(
                 showClients ? {
