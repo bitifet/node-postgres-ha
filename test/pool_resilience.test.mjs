@@ -100,7 +100,7 @@ export default function deadPool_tests(poolName, {Pool}) {
                 await createClient();
                 await createClient();
                 const waitSeconds = .01;
-                const t0 = Date.now();
+                const t0 = performance.now();
                 const ongoingQueries = Promise.all(clients.map(
                     cl=>cl.query("select pg_sleep($1)", [waitSeconds])
                 ));
@@ -114,7 +114,7 @@ export default function deadPool_tests(poolName, {Pool}) {
                 );
                 await ongoingQueries;
 
-                const elapsed = Date.now() - t0;
+                const elapsed = performance.now() - t0;
                 await assert(
                     elapsed >= waitSeconds
                     , "Clients relased only after query ends"

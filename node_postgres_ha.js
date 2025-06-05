@@ -57,7 +57,7 @@ const clientTimeoutMillis = cl => (
     ! cl.connectionParameters.client_timeout ? Infinity
     : Math.max(
         0 // Already timed out
-        , cl.ctime + cl.connectionParameters.client_timeout - Date.now()
+        , cl.ctime + cl.connectionParameters.client_timeout - performance.now()
     )
 );
 
@@ -118,7 +118,7 @@ class Pool extends pg.Pool {
                 };
 
 
-                this.ctime = Date.now();
+                this.ctime = performance.now();
                 this.on("error", err => parentPool.emit("allErrors", err, this)); 
             };
             async query(...args) {
@@ -229,7 +229,7 @@ class Pool extends pg.Pool {
             let client = await super.connect(...args);
             let released = false;
 
-            client.ctime = Date.now(); // Renew ctime every time reused.
+            client.ctime = performance.now(); // Renew ctime every time reused.
 
             // Proxy-wrap:
             client = new Proxy(client, {
