@@ -4,10 +4,16 @@ node-postgres-ha
 High-Availability wrapper(s) over
 [node-postgres](https://github.com/brianc/node-postgres).
 
--------------------------
+
+[![NPM Version][npm-image]][npm-url]
+[![NPM Downloads][downloads-image]][downloads-url]
+[![License][license-image]][license-url]
+
 
 *node-postgres-ha* is a wrapper over *node-postgres* implemented in order to
 address some issues found while trying to improve application's resilience.
+
+-------------------------
 
 Many of those issues are:
 
@@ -197,3 +203,12 @@ Automate downloading of mainstream node-postgres tests and pass them too.
 
   [MIT](LICENSE)
 
+
+
+
+[npm-image]: https://img.shields.io/npm/v/ha-pg.svg
+[npm-url]: https://npmjs.org/package/ha-pg
+[downloads-image]: https://img.shields.io/npm/dm/ha-pg.svg
+[downloads-url]: https://npmjs.org/package/ha-pg
+[license-image]: https://img.shields.io/badge/license-MIT-brightgreen.svg
+[license-url]: https://opensource.org/licenses/MIT

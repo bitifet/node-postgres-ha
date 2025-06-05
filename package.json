@@ -1,6 +1,6 @@
 {
   "name": "ha-pg",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "",
   "main": "node_postgres_ha.js",
   "scripts": {
@@ -8,8 +8,8 @@
     "test_mainstream": "mocha test/index.mainstream.mjs"
   },
   "keywords": [
-    "high-availability",
     "postgresql",
+    "high-availability",
     "backend",
     "database",
     "postgres",
