@@ -181,20 +181,17 @@ export default function deadPool_tests(poolName, {Pool}) {
                 createPool();
 
                 let errorHappened = false;
-                let errorDetected = false;
+                let errorEventEmitted = false;
+                let allErrorsEventEmitted = false;
 
-                const errHandler = err => errorDetected = true;
-                pool.on("error", errHandler);
+                pool.on("error", err => errorEventEmitted = true);
                     // Just to establish it is not reported.
-                pool.on("allErrors", errHandler);
+                pool.on("allErrors", err => allErrorsEventEmitted = true);
                     // Client errors will be mapped through this new event.
 
-                pool.on("error", function (err) {
-                    errorDetected = true;
-                });
+                await createClient();
+                await createClient();
 
-                await createClient();
-                await createClient();
 
                 try {
                     await [...clients][0].query("INVALID SQL QUERY");
@@ -208,9 +205,14 @@ export default function deadPool_tests(poolName, {Pool}) {
                     , "Intentional error should happen"
                 );
                 await assert.strictEqual(
-                    errorDetected
+                    errorEventEmitted
                     , true
-                    , "Intentional error should be detected"
+                    , "Intentional query error should emit error event"
+                );
+                await assert.strictEqual(
+                    allErrorsEventEmitted
+                    , true
+                    , "Intentional query error should emit allErrors event"
                 );
 
             }
