@@ -125,7 +125,7 @@ class Pool extends pg.Pool {
                 try {
                     return await super.query(...args);
                 } catch (err) {
-                    this.emit("error", err);
+                    parentPool.emit("error", err);
                     throw err;
                 };
             };
