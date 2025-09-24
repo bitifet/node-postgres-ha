@@ -26,5 +26,8 @@
   "license": "MIT",
   "devDependencies": {
     "mocha": "^10.7.3"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
   }
 }
