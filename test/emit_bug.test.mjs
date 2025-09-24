@@ -3,36 +3,59 @@ import { Pool } from "../node_postgres_ha.js";
 
 describe("Testing TypeError: this.emit is not a function bug", function() {
     
-    it("should handle query errors by emitting to parent pool instead of client", async function() {
+    it("should handle query errors through parentPool.emit instead of this.emit", function(done) {
         // Create a pool 
         const pool = new Pool({
             max: 1,
             allowExitOnIdle: true,
         });
 
-        // Track errors emitted to pool
-        let allErrorsEmitted = [];
+        // Track errors emitted to pool - this is where the fix should route errors
+        let allErrorsReceived = [];
         pool.on("allErrors", (err, client) => {
-            allErrorsEmitted.push({ err, client });
+            allErrorsReceived.push({ err, client });
+            console.log("allErrors received:", err.message);
         });
         
         // Create a client instance using the pool's Client class
         const ClientClass = pool.Client;
         const testClient = new ClientClass({});
         
-        // Test that the client has the right emit behavior
-        // The client should NOT have an emit function that works like EventEmitter
-        // Instead, errors should be emitted to parentPool
-        assert(
-            typeof testClient.emit !== 'function' || testClient.emit.toString().includes('parentPool'),
-            "Client should either not have emit or should route to parentPool"
-        );
+        // Simulate the scenario from the bug report: query fails and tries to emit error
+        const originalQuery = Object.getPrototypeOf(Object.getPrototypeOf(testClient)).query;
+        Object.getPrototypeOf(Object.getPrototypeOf(testClient)).query = function() {
+            throw new Error("Simulated query failure for testing");
+        };
         
-        await pool.end();
+        // Call query - this should trigger the error handling code that was buggy
+        testClient.query("SELECT 1").then(() => {
+            done(new Error("Expected query to throw error"));
+        }).catch((err) => {
+            // Restore original method
+            Object.getPrototypeOf(Object.getPrototypeOf(testClient)).query = originalQuery;
+            
+            // Check that the error was our expected error, not a TypeError
+            if (err.message.includes("this.emit is not a function")) {
+                done(new Error("Fix failed: still getting emit TypeError"));
+            } else if (err.message === "Simulated query failure for testing") {
+                // Good! The error was properly handled
+                // Check that the error was also emitted to parentPool
+                setTimeout(() => {
+                    if (allErrorsReceived.length > 0) {
+                        console.log("✅ Error correctly routed to parentPool");
+                        pool.end().then(() => done()).catch(done);
+                    } else {
+                        done(new Error("Error was not emitted to parentPool as expected"));
+                    }
+                }, 10);
+            } else {
+                done(new Error("Unexpected error: " + err.message));
+            }
+        });
     });
 
     it("should not throw TypeError when query encounters error", function(done) {
-        // Create a pool and override internal behavior to test the fix
+        // Create a pool and test that query errors don't cause TypeError
         const pool = new Pool({
             max: 1,
             allowExitOnIdle: true,
@@ -50,7 +73,6 @@ describe("Testing TypeError: this.emit is not a function bug", function() {
         const client = new ClientClass({});
         
         // Simulate the scenario where super.query throws an error
-        // and the client.query method needs to emit the error
         const originalQuery = Object.getPrototypeOf(Object.getPrototypeOf(client)).query;
         Object.getPrototypeOf(Object.getPrototypeOf(client)).query = function() {
             throw new Error("Test query error");
