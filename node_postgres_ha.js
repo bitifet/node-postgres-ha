@@ -1,6 +1,7 @@
 
 const pg = require("pg");
 const net = require("net");
+const path = require("path");
 
 const pings = new Map();
 const PING_MESSAGE = Buffer.from([
@@ -9,9 +10,15 @@ const PING_MESSAGE = Buffer.from([
 ]);
 const PONG_PATTERN = "SFATAL";
 const PING_TIMEOUT = 1000; // Maximum ms to wait for ping connection.
+const PG_DEFAULT_PORT = 5432;
 
-async function isReachable(host, port) {
+async function isReachable(host, port = PG_DEFAULT_PORT, isDomainSocket = false) {
     const key = `${host}:${port}`;
+    const connectArgs = (
+        isDomainSocket ? [path.join(host, `.s.PGSQL.${port}`)]
+        : [port, host]
+    );
+
     if (! pings.has(key)) {
         const newPing = new Promise((resolve) => {
             const socket = new net.Socket();
@@ -32,7 +39,7 @@ async function isReachable(host, port) {
             });
             socket.on("close", (err) => {
                 ///console.log(" ✖️  Close!!!", err);
-                resolve("false");
+                resolve(false);
                     // Just in case its closed due to non expected reason.
                 clearTimeout(timer);
             });
@@ -40,7 +47,7 @@ async function isReachable(host, port) {
                 ///console.log(" 🔥 Connect!!!", args)
                 socket.write(PING_MESSAGE);
             });
-            socket.connect(port, host);
+            socket.connect(...connectArgs);
         });
         pings.set(key, newPing);
         newPing.then(() => pings.delete(key)); // Purge afterwards
@@ -100,6 +107,10 @@ class Pool extends pg.Pool {
             this.on("remove" , updateClientsPeak);
         };
 
+
+        // Capture initial connection parameters:
+        const { connectionParameters } = new pg.Client(options);
+        this.connectionParameters = connectionParameters;
 
         // Implement allErrors event:{{{
         // --------------------------
@@ -379,10 +390,8 @@ class Pool extends pg.Pool {
     };//}}}
 
     async isAlive () {//{{{
-        const host = this.options.host || "localhost";
-        const port = this.options.port || 5432;
-            // 👆 FIXME: These should go in sync with node-postgres
-        return await isReachable(host, port);
+        const {host, port, isDomainSocket} = this.connectionParameters;
+        return await isReachable(host, port, isDomainSocket);
     };//}}}
 
     watchForConnection(err = false) {//{{{
