@@ -319,7 +319,6 @@ export default function deadPool_tests(poolName, {Pool}) {
             }
         )//}}}
 
-
         it( 'Reports when pool overflows'//{{{
             , async function () {
                 createPool({
@@ -338,6 +337,17 @@ export default function deadPool_tests(poolName, {Pool}) {
             }
         )//}}}
 
+        it( 'isAlive method works'//{{{
+            , async function () {
+                createPool()
+                await assert.strictEqual(
+                    await pool.isAlive()
+                    , true
+                    , "isAlive() does not report as true"
+                );
+                await pool.end();
+            }
+        )//}}}
 
         //❓ Ongoing checking...
         // =====================
