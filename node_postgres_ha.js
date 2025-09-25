@@ -3,7 +3,7 @@ const pg = require("pg");
 const net = require("net");
 const path = require("path");
 
-const pings = new Map();
+const pings = new Map(); // Global conection pings cache.
 const PING_MESSAGE = Buffer.from([
     0x00, 0x00, 0x00, 0x08, // Packet length
     0x00, 0x00, 0x00, 0x00  // Non existent Postgres version
@@ -11,50 +11,6 @@ const PING_MESSAGE = Buffer.from([
 const PONG_PATTERN = "SFATAL";
 const PING_TIMEOUT = 1000; // Maximum ms to wait for ping connection.
 const PG_DEFAULT_PORT = 5432;
-
-async function isReachable(host, port = PG_DEFAULT_PORT, isDomainSocket = false) {
-    const key = `${host}:${port}`;
-    const connectArgs = (
-        isDomainSocket ? [path.join(host, `.s.PGSQL.${port}`)]
-        : [port, host]
-    );
-
-    if (! pings.has(key)) {
-        const newPing = new Promise((resolve) => {
-            const socket = new net.Socket();
-            const timer = setTimeout(() => {
-                ///console.log(" 🕒 Timeout!!!");
-                if (! socket.destroyed) socket.destroy();
-                resolve(false);
-            }, PING_TIMEOUT);
-            socket.on("error", (err)=>{
-                ///console.log(" ❌ Error!!!", err?.message);
-                resolve(false);
-                socket.destroy();
-            });
-            socket.on("data", data => {
-                ///console.log(" 📝 DATA!!!", data.toString());
-                resolve (!! data.toString().match(PONG_PATTERN)); // Alive if matches
-                socket.end();
-            });
-            socket.on("close", (err) => {
-                ///console.log(" ✖️  Close!!!", err);
-                resolve(false);
-                    // Just in case its closed due to non expected reason.
-                clearTimeout(timer);
-            });
-            socket.on("connect", (...args)=> {
-                ///console.log(" 🔥 Connect!!!", args)
-                socket.write(PING_MESSAGE);
-            });
-            socket.connect(...connectArgs);
-        });
-        pings.set(key, newPing);
-        newPing.then(() => pings.delete(key)); // Purge afterwards
-    };
-    return await pings.get(key); // Reuse previous ping
-};
-
 
 const sleep = ms=>new Promise(resolve=>setTimeout(resolve, ms));
 const clientIsDefunct = cl => !!cl._ended;
@@ -390,8 +346,53 @@ class Pool extends pg.Pool {
     };//}}}
 
     async isAlive () {//{{{
-        const {host, port, isDomainSocket} = this.connectionParameters;
-        return await isReachable(host, port, isDomainSocket);
+        const {
+            host,
+            port = PG_DEFAULT_PORT,
+            isDomainSocket = false,
+        } = this.connectionParameters;
+
+        const key = `${host}:${port}`;
+        const connectArgs = (
+            isDomainSocket ? [path.join(host, `.s.PGSQL.${port}`)]
+            : [port, host]
+        );
+
+        if (! pings.has(key)) {
+            const newPing = new Promise((resolve) => {
+                const socket = new net.Socket();
+                const timer = setTimeout(() => {
+                    ///console.log(" 🕒 Timeout!!!");
+                    if (! socket.destroyed) socket.destroy();
+                    resolve(false);
+                }, PING_TIMEOUT);
+                socket.on("error", (err)=>{
+                    ///console.log(" ❌ Error!!!", err?.message);
+                    resolve(false);
+                    socket.destroy();
+                });
+                socket.on("data", data => {
+                    ///console.log(" 📝 DATA!!!", data.toString());
+                    resolve (!! data.toString().match(PONG_PATTERN)); // Alive if matches
+                    socket.end();
+                });
+                socket.on("close", (err) => {
+                    ///console.log(" ✖️  Close!!!", err);
+                    resolve(false);
+                        // Just in case its closed due to non expected reason.
+                    clearTimeout(timer);
+                });
+                socket.on("connect", (...args)=> {
+                    ///console.log(" 🔥 Connect!!!", args)
+                    socket.write(PING_MESSAGE);
+                });
+                socket.connect(...connectArgs);
+            });
+            pings.set(key, newPing);
+            newPing.then(() => pings.delete(key)); // Purge afterwards
+        };
+        return await pings.get(key); // Reuse previous ping
+
     };//}}}
 
     watchForConnection(err = false) {//{{{
